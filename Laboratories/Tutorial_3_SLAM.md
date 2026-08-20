@@ -163,12 +163,12 @@ El orden importa porque el LiDAR y el TF deben empezar a llegar antes de arranca
 
 ```bash
 cd ~/autodrive/f1tenth_ws/simulator
-./run_with_nvidia.sh
+./"AutoDRIVE Simulator.x86_64"
 ```
 
-Usa siempre `run_with_nvidia.sh`, no el binario a secas (`AutoDRIVE Simulator.x86_64`) — en laptops con GPU NVIDIA + Optimus/PRIME (configuración común), sin este wrapper todo corre en la GPU integrada por defecto, mucho más lento.
-
 En el simulador: click en el ícono de antena hasta que diga **Connected**, verificar modo **Autonomous**.
+
+> Si tu laptop tiene GPU NVIDIA con gráficos híbridos (Optimus/PRIME) y notás que el simulador va lento o corre por la integrada, puede hacer falta forzar la GPU dedicada (por ejemplo con `prime-run` o un wrapper equivalente con `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia`) — no es parte del setup estándar, depende de tu hardware.
 
 ### Terminal 2 — Bridge
 
@@ -352,7 +352,7 @@ ros2 lifecycle set /map_server activate
 ## Resumen del orden de arranque
 
 ```text
-1. Simulador AutoDRIVE (~/autodrive/f1tenth_ws/simulator, run_with_nvidia.sh)
+1. Simulador AutoDRIVE (~/autodrive/f1tenth_ws/simulator)
 2. Bridge ROS 2 con RViz incluido (Camera display OFF)
 3. Esperar 3-5 segundos
 4. Teleoperación (teleop_keyboard o gap_node)

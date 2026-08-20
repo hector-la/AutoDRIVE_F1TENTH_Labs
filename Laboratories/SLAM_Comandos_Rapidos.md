@@ -1,6 +1,6 @@
 # SLAM — Comandos Rápidos (mapear, guardar, volver a cargar)
 
-Chuleta operativa: solo comandos, en orden, sin explicación larga. Para el detalle de *por qué* cada parámetro/flag es así, ver `Tutorial_3_SLAM.md` y `CLAUDE.md`.
+Chuleta operativa: solo comandos, en orden, sin explicación larga. Para el detalle de *por qué* cada parámetro/flag es así, ver `Tutorial_3_SLAM.md`.
 
 Bloque de preparación que se repite en cada terminal:
 ```bash
@@ -17,9 +17,9 @@ source install/setup.bash
 ### Terminal 1 — Simulador
 ```bash
 cd ~/autodrive/f1tenth_ws/simulator
-./run_with_nvidia.sh
+./"AutoDRIVE Simulator.x86_64"
 ```
-Click en el ícono de antena → **Connected**, verificar modo **Autonomous**.
+Click en el ícono de antena → **Connected**, verificar modo **Autonomous**. (Si tenés GPU NVIDIA con gráficos híbridos y va lento, puede hacer falta forzar la GPU dedicada — depende de tu hardware, no es parte del setup estándar.)
 
 ### Terminal 2 — Bridge + RViz
 ```bash
@@ -27,7 +27,7 @@ cd ~/autodrive/f1tenth_ws
 source venv/bin/activate && source /opt/ros/humble/setup.bash && source install/setup.bash
 ros2 launch autodrive_f1tenth simulator_bringup_rviz.launch.py
 ```
-**Antes de mapear**: en el panel de Displays de RViz, destildar/borrar el display **Camera** (`front_camera`) — si queda activo, satura el bridge y puede tirar abajo LiDAR/TF sin avisar (`CLAUDE.md` gotcha #9).
+**Antes de mapear**: en el panel de Displays de RViz, destildar/borrar el display **Camera** (`front_camera`) — si queda activo, satura el bridge y puede tirar abajo LiDAR/TF sin avisar.
 
 ### Terminal 3 — SLAM Toolbox
 ```bash
@@ -36,8 +36,8 @@ source venv/bin/activate && source /opt/ros/humble/setup.bash && source install/
 CFG=$(realpath ./src/config/mapper_params_online_async.yaml)
 ros2 launch slam_toolbox online_async_launch.py slam_params_file:=$CFG use_sim_time:=true
 ```
-- `use_sim_time:=true` es obligatorio aunque el bridge no publique `/clock` (gotcha #6) — con `false`, descarta todos los scans.
-- Antes de lanzar: `ps aux | grep slam_toolbox` — no debe quedar una instancia vieja corriendo (gotcha #11, compiten por `/map`).
+- `use_sim_time:=true` es obligatorio aunque el bridge no publique `/clock` — con `false`, descarta todos los scans.
+- Antes de lanzar: `ps aux | grep slam_toolbox` — no debe quedar una instancia vieja corriendo (compiten por `/map`).
 
 ### Terminal 4 — Manejar (FTG autónomo)
 ```bash
