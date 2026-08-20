@@ -15,12 +15,11 @@ setup(
     zip_safe=True,
     maintainer='hector-la',
     maintainer_email='hectorla@espol.edu.ec',
-    description='Control nodes for the AutoDRIVE F1TENTH vehicle (labs/tutorials)',
+    description='F1TENTH lab controllers for the AutoDRIVE simulator',
     license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'teleop_hold = controllers.teleop_hold:main',
             'gap_node = controllers.gap_node:main',
         ],
     },

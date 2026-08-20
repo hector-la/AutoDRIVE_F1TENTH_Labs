@@ -3,7 +3,7 @@
 <package format="3">
   <name>controllers</name>
   <version>0.0.1</version>
-  <description>Control nodes for the AutoDRIVE F1TENTH vehicle (labs/tutorials)</description>
+  <description>F1TENTH lab controllers for the AutoDRIVE simulator</description>
   <maintainer email="hectorla@espol.edu.ec">hector-la</maintainer>
   <license>MIT</license>
 

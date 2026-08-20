@@ -1,14 +1,14 @@
 # AutoDRIVE F1TENTH Labs
 
-Laboratorios, nodos de control y guías para el F1TENTH en el simulador [AutoDRIVE](https://github.com/Tinker-Twins/AutoDRIVE), pensado para el club AIRos.
+Lab de SLAM (mapeo 2D) para el F1TENTH en el simulador [AutoDRIVE](https://github.com/Tinker-Twins/AutoDRIVE), pensado para el club AIRos.
 
 ## Requisito previo
 
-Este repo **no instala nada por sí solo** — asume que ya tenés el workspace base andando (simulador + venv + bridge ROS 2). Seguí primero:
+Este repo **no instala nada por sí solo** — asume que ya seguiste el starter kit y probaste el teleop que trae AutoDRIVE (`ros2 run autodrive_f1tenth teleop_keyboard`):
 
 👉 **[AutoDRIVE_DevKit_Starter](https://github.com/hector-la/AutoDRIVE_DevKit_Starter)**
 
-Una vez que tengas `~/autodrive/f1tenth_ws` compilado y el teleop del devkit funcionando, volvé acá.
+Si ya tenés `~/autodrive/f1tenth_ws` compilado y ese teleop funcionando, andá directo al Lab 3 de acá abajo.
 
 ## Cómo usar este repo
 
@@ -40,27 +40,25 @@ head -1 install/controllers/lib/controllers/gap_node
 
 ```
 src/
-├── controllers/         # paquete ROS 2 con los nodos de control
+├── controllers/         # paquete ROS 2 con el nodo de control
 │   └── controllers/
-│       ├── teleop_hold.py   # teleop por teclado (acelerador con latch, dirección hold-to-turn)
-│       └── gap_node.py      # Follow The Gap — navegación reactiva autónoma
+│       └── gap_node.py      # Follow The Gap — navegación reactiva autónoma, para mapear sin manos
 └── config/
     └── mapper_params_online_async.yaml   # config de slam_toolbox para este setup
 
 Laboratories/
-├── 00_Teoria_y_Conceptos.md      # conceptos de ROS 2 / TF usados en los labs
-├── Tutorial_3_SLAM.md            # SLAM explicado paso a paso, con el porqué de cada comando
+├── Tutorial_3_SLAM.md            # Lab 3: SLAM explicado paso a paso, con el porqué de cada comando
 └── SLAM_Comandos_Rapidos.md      # la misma guía, solo comandos, para consulta rápida
 ```
 
-## Empezar
+## Lab 3 — SLAM (mapeo 2D)
 
-1. Manejar el auto: `ros2 run controllers teleop_hold` (ver `Laboratories/00_Teoria_y_Conceptos.md`).
-2. Mapear con SLAM: `Laboratories/Tutorial_3_SLAM.md` (guía completa) o `Laboratories/SLAM_Comandos_Rapidos.md` (solo comandos).
+1. Seguí `Laboratories/Tutorial_3_SLAM.md` de punta a punta (explica cada paso) — o `Laboratories/SLAM_Comandos_Rapidos.md` si ya lo hiciste una vez y solo necesitás los comandos.
+2. Vas a: instalar `slam_toolbox`, levantar simulador + bridge + `slam_toolbox` + `gap_node` (maneja solo, no hace falta teleop), mapear el circuito, y guardar el mapa (como imagen `.pgm`/`.yaml` y como pose-graph nativo de `slam_toolbox`).
 
 ## Agregar tu propio nodo
 
-Ver la sección "Adding a Controller Node" — el patrón es: creás el archivo en `src/controllers/controllers/`, lo registrás como entrypoint en `src/controllers/setup.py`, `colcon build --symlink-install`, y `ros2 run controllers <nombre>`.
+El patrón: creás el archivo en `src/controllers/controllers/`, lo registrás como entrypoint en `src/controllers/setup.py`, `colcon build --symlink-install`, y `ros2 run controllers <nombre>`.
 
 ```python
 class MiNodo(Node):
@@ -87,7 +85,7 @@ class MiNodo(Node):
 | `/autodrive/f1tenth_1/ips` | `geometry_msgs/Point` | ← sim |
 | `/autodrive/f1tenth_1/front_camera` | `sensor_msgs/Image` | ← sim |
 
-TF: `map → f1tenth_1 → {lidar, imu, ips, front_camera, ...}`. Detalle en `Laboratories/00_Teoria_y_Conceptos.md`.
+TF: `map → f1tenth_1 → {lidar, imu, ips, front_camera, ...}`.
 
 ## Créditos
 
