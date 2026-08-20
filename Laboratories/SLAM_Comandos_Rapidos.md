@@ -38,8 +38,18 @@ ros2 launch slam_toolbox online_async_launch.py slam_params_file:=$CFG use_sim_t
 ```
 - `use_sim_time:=true` es obligatorio aunque el bridge no publique `/clock` — con `false`, descarta todos los scans.
 - Antes de lanzar: `ps aux | grep slam_toolbox` — no debe quedar una instancia vieja corriendo (compiten por `/map`).
+- Confirmá que levantó bien (`ros2 node list | grep slam`) antes de manejar — si te movés antes, los primeros metros quedan sin mapear.
 
-### Terminal 4 — Manejar (FTG autónomo)
+### Terminal 4 — Manejar (dos opciones)
+
+**Opción A — vos mismo:**
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate && source /opt/ros/humble/setup.bash && source install/setup.bash
+ros2 run autodrive_f1tenth teleop_keyboard
+```
+
+**Opción B — `gap_node` (FTG autónomo, recomendado):**
 ```bash
 cd ~/autodrive/f1tenth_ws
 source venv/bin/activate && source /opt/ros/humble/setup.bash && source install/setup.bash

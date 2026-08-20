@@ -191,22 +191,7 @@ Deja que el bridge empiece a publicar `/tf`, `/tf_static` y `/autodrive/f1tenth_
 
 > No reinicies Unity mientras `slam_toolbox` esté corriendo — puede generar warnings `TF_OLD_DATA`.
 
-### Terminal 3 — Teleoperación
-
-```bash
-cd ~/autodrive/f1tenth_ws
-source venv/bin/activate
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-
-ros2 run autodrive_f1tenth teleop_keyboard
-```
-
-No muevas el auto todavía — primero arranca y verifica `slam_toolbox`.
-
-> **Alternativa para mapear sin manos:** `ros2 run controllers gap_node` en vez de `teleop_keyboard` — implementa Follow The Gap (FTG), un algoritmo de navegación reactiva: en cada scan del LiDAR busca el hueco libre más grande frente al auto y se dirige a su centro, sin necesitar un mapa ni un humano manejando. Ya tuneado para este circuito (velocidad baja a propósito — mapear rápido genera drift y deforma el mapa). Ctrl+C o `kill <pid>` (sin `-9`) frenan el auto de forma segura antes de matar el nodo, no queda girando/acelerando solo.
-
-### Terminal 4 — SLAM Toolbox
+### Terminal 3 — SLAM Toolbox
 
 ```bash
 cd ~/autodrive/f1tenth_ws
@@ -223,11 +208,45 @@ ros2 launch slam_toolbox online_async_launch.py \
 
 **Nota:** `use_sim_time:=true` es obligatorio acá, aunque el bridge de AutoDRIVE no publique `/clock` — con `false`, `slam_toolbox` descarta todos los scans de LiDAR con el error `"the timestamp on the message is earlier than all the data in the transform cache"`. Antes de lanzar, confirma que no quede un `slam_toolbox` viejo corriendo de una sesión anterior (`ps aux | grep slam_toolbox`) — dos instancias vivas a la vez compiten por publicar `/map` y parece que "el mapa se congeló".
 
+`slam_toolbox` tiene que estar arriba y sano **antes** de manejar — si arrancás a moverte antes, los primeros metros del circuito quedan sin mapear. Confirmá que levantó bien (`ros2 node list | grep slam`) antes de pasar a la Terminal 4.
+
+### Terminal 4 — Manejar
+
+Elegí una de las dos opciones:
+
+**Opción A — Manejar vos mismo:**
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run autodrive_f1tenth teleop_keyboard
+```
+
+Teleop por teclado que trae AutoDRIVE. Si ya lo usaste siguiendo el starter kit, es el mismo comando.
+
+**Opción B — Mapear sin manos con `gap_node` (recomendado para este lab):**
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run controllers gap_node
+```
+
+`gap_node` viene incluido en este repo (`src/controllers/controllers/gap_node.py`) — lo copiaste a tu workspace en el paso "Cómo usar este repo" del `README.md`. Implementa **Follow The Gap (FTG)**, un algoritmo de navegación reactiva: en cada scan del LiDAR busca el hueco libre más grande frente al auto y se dirige a su centro, sin necesitar un mapa ni un humano manejando. Ya viene tuneado para este circuito, con velocidad baja a propósito (mapear rápido genera drift y deforma el mapa). Para pararlo, Ctrl+C o `kill <pid>` (sin `-9`) — frena el auto de forma segura antes de matar el proceso, no queda girando/acelerando solo.
+
+Usamos `gap_node` para armar este lab precisamente por esto: te deja mapear el circuito completo sin necesitar dos personas (una manejando, otra mirando la terminal) ni estar pendiente del teclado — arrancás el nodo y te concentrás en observar el mapa formarse en RViz.
+
 ### Configurar RViz
 
 En la misma ventana de RViz que abrió la Terminal 2 (no hace falta abrir otra): configurá `Fixed Frame` = `slam_map`, agregá un display `Map` suscrito al tópico `/map`, y (opcional) `LaserScan` sobre `/autodrive/f1tenth_1/lidar` para ver el LiDAR en vivo mientras mapeas.
 
-Ahora sí, maneja despacio por el circuito (Terminal 3 — `teleop_keyboard` o `gap_node`) y observa el mapa formarse en RViz.
+Con el auto manejando (Terminal 4), observá el mapa formarse en RViz.
 
 **Da 2-3 vueltas completas antes de guardar, no cortes apenas cierra la primera.** Vas a notar que al completar la primera vuelta, justo donde el auto vuelve cerca del punto de partida, el mapa "salta" o se ve desfasado entre el inicio y el final — eso es normal, no un error. Es el **loop closure**: mientras das la vuelta, `slam_toolbox` va encadenando cada scan nuevo contra el anterior (scan matching local), y ese emparejamiento tiene un pequeño error cada vez que se va acumulando (drift). Cuando el auto vuelve a pasar cerca de una zona ya mapeada, `slam_toolbox` la reconoce y corre una optimización global de todo el grafo de poses que "engancha" el final con el inicio — ese salto que ves es esa corrección funcionando, no rompiéndose. Necesita juntar varios scans en la zona de cierre antes de confiar en el match, así que **no pares justo ahí** — un par de vueltas extra le dan más para afinar el cierre y el desfase final queda mucho menor.
 
@@ -242,7 +261,7 @@ Guarda dos cosas distintas, con roles distintos — vale la pena guardar ambas:
 | Mapa estático | `.pgm` (imagen) + `.yaml` (metadata) | Formato estándar de ROS/Nav2. Sirve para **localización** sobre un mapa ya terminado (por ejemplo con AMCL), o simplemente para visualizarlo después. Es una foto final, no se puede "continuar mapeando" a partir de él. |
 | Pose-graph | `.data` + `.posegraph` | Formato nativo de `slam_toolbox` — el grafo completo de poses y scans que usó para construir el mapa. Sirve para **retomar el mapeo** más adelante sin perder todo el trabajo de scan matching ya hecho. |
 
-**No mates `slam_toolbox` para guardar** — tiene que seguir corriendo y publicando `/map`. Podés parar el nodo que estaba manejando (Terminal 3, `teleop_keyboard` o `gap_node`) sin problema.
+**No mates `slam_toolbox` para guardar** — tiene que seguir corriendo y publicando `/map`. Podés parar el nodo que estaba manejando (Terminal 4, `teleop_keyboard` o `gap_node`) sin problema.
 
 ### 4.1 Crear carpeta de mapas
 
@@ -355,9 +374,9 @@ ros2 lifecycle set /map_server activate
 1. Simulador AutoDRIVE (~/autodrive/f1tenth_ws/simulator)
 2. Bridge ROS 2 con RViz incluido (Camera display OFF)
 3. Esperar 3-5 segundos
-4. Teleoperación (teleop_keyboard o gap_node)
-5. SLAM Toolbox con use_sim_time:=true
-6. Configurar RViz (Fixed Frame=slam_map, display Map) y manejar despacio, 2-3 vueltas completas
+4. SLAM Toolbox con use_sim_time:=true — confirmar que levantó antes de seguir
+5. Manejar: teleop_keyboard o gap_node (recomendado, mapea sin manos)
+6. Configurar RViz (Fixed Frame=slam_map, display Map) y observar, 2-3 vueltas completas
 7. Guardar el mapa (mapa .pgm/.yaml + pose-graph)
 8. (Opcional) Volver a cargarlo en RViz con map_server
 ```
