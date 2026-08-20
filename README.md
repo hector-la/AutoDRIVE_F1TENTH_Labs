@@ -31,7 +31,7 @@ source venv/bin/activate && source /opt/ros/humble/setup.bash
 colcon build --symlink-install && source install/setup.bash
 ```
 
-Verificación rápida (el shebang debe apuntar al venv, no al Python del sistema):
+Verificación rápida — parado en `~/autodrive/f1tenth_ws` (la ruta de abajo es relativa a esa carpeta), no hace falta el venv activado para este comando en particular (es solo `head`, lectura de un archivo, no ejecuta nada de Python). Confirma que el shebang generado apunte al venv, no al Python del sistema:
 
 ```bash
 head -1 install/controllers/lib/controllers/gap_node
