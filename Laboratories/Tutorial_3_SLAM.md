@@ -1,0 +1,403 @@
+# Tutorial 3: SLAM (Mapeo 2D) del F1TENTH en AutoDRIVE
+
+Adaptado de [Tutorial 3 de nabihandres/AUTODRIVE](https://github.com/nabihandres/AUTODRIVE/blob/main/Tutorial%203%3A%20Simultaneous%20Localization%20and%20Maping.md) a la estructura real de este workspace (`~/autodrive/f1tenth_ws`).
+
+## ⚠️ Diferencias respecto al tutorial original (leer antes de empezar)
+
+1. **Rutas.** El tutorial original asume `~/autodrive_ws` y el simulador en `~/Downloads/AutoDRIVE_Sim`. Aquí todo vive en `~/autodrive/f1tenth_ws` (workspace + venv + simulador consolidados, ver `README.md` del repo).
+2. **`use_sim_time:=true`, tal como pide el tutorial original — a pesar de que el bridge no publica `/clock`.** ⚠️ Esto se documentó al revés hasta el 19/08/2026 (esta misma nota decía `false`, razonando que `true` se quedaría esperando un `/clock` que nunca llega). Esa lógica sonaba bien pero era **incorrecta en la práctica**: probado directo con `tf2_ros` (no solo "se ve en RViz"), con `use_sim_time:=false` `slam_toolbox` descarta **cada scan de LiDAR, siempre**, con el error `"the timestamp on the message is earlier than all the data in the transform cache"` — sin importar qué tan sano esté el resto del pipeline. Cambiando solo ese flag a `true`, sin tocar nada más, el transform `slam_map → lidar` empezó a resolver de inmediato. El bridge (`autodrive_incoming_bridge.py`) sigue sin publicar `/clock` y sigue usando `get_clock().now()` (hora real) para todos sus timestamps — eso no cambió. El mecanismo exacto de por qué `slam_toolbox` necesita `true` de todos modos no está confirmado a nivel de código (probablemente es cómo maneja sus propios timeouts internos, no que reciba tiempo de simulación real), pero el fix es reproducible. Detalle en `CLAUDE.md`, gotcha #6.
+3. **No existe `/scan`.** En este setup, la lista de tópicos no incluye `/scan` en absoluto (ni siquiera como tópico sin publicador, como sugiere el tutorial original) — solo existe `/autodrive/f1tenth_1/lidar`. El paso 2.3 de abajo te deja comprobarlo tú mismo.
+4. **Frames TF confirmados por código**, pero igual verificables por ti en el paso 2.4 — `map → f1tenth_1 → lidar` coincide con lo que ya revisé en `autodrive_incoming_bridge.py` (`broadcast_transform("f1tenth_1", "map", ...)`, `broadcast_transform("lidar", "f1tenth_1", ...)`), así que la configuración de frames del tutorial original aplica tal cual.
+5. **No hace falta `PYTHONPATH` ni ningún otro workaround** — ya está resuelto de raíz (ver README del repo).
+6. **Requiere que el simulador corra a buen ritmo** — pero cuidado con el diagnóstico. Un simulador lento (LiDAR a <1 Hz) sí perjudica SLAM, y hasta el 19/08/2026 se creía que ESA era la causa completa del bloqueo (GPU NVIDIA sin driver). Resultó ser un problema real pero separado del bloqueo total: el driver se arregló, el LiDAR mejoró a ~1-3.5 Hz, y `slam_toolbox` **seguía** descartando cada scan — la causa de fondo era el punto 2 de arriba (`use_sim_time`). No asumas que es la GPU sin antes revisar el punto 2.
+7. **La cámara frontal en RViz puede tumbar el nodo del bridge sin avisar.** Si `simulator_bringup_rviz.launch.py` trae un display de Camera activo sobre `front_camera`, esa sola suscripción hace que `autodrive_incoming_bridge` decodifique cada frame (el paso más caro de su callback) y se sature tanto que desaparece de `ros2 node list` — sigue vivo como proceso, solo que muy ocupado para anunciarse. Si ni siquiera ves el nodo del bridge (no solo scans descartados), desmarca esa Camera en RViz antes de seguir. Ver `CLAUDE.md`, gotcha #9.
+8. **Guardar y volver a cargar el mapa** no se hace desde el panel de RViz (el tutorial original usa el plugin `SlamToolboxPlugin`, que puede no estar disponible en tu config) — acá se usa la CLI de `nav2_map_server`, más portable. Ver secciones 4 y 5, más abajo.
+
+## Prerrequisitos
+
+- `~/autodrive/f1tenth_ws` compilado y validado (simulador + bridge + teleop funcionando). Si no, seguir primero [AutoDRIVE_DevKit_Starter](https://github.com/hector-la/AutoDRIVE_DevKit_Starter).
+
+Bloque de preparación de terminal que se repetirá varias veces:
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+```
+
+---
+
+## 1. Instalar SLAM Toolbox
+
+`slam_toolbox` es un paquete de sistema (vía `apt`), no va en el venv:
+
+```bash
+sudo apt update
+sudo apt install ros-humble-slam-toolbox
+```
+
+Verificar instalación:
+
+```bash
+source /opt/ros/humble/setup.bash
+ros2 pkg prefix slam_toolbox
+ls $(ros2 pkg prefix slam_toolbox)/share/slam_toolbox/launch
+```
+
+### Modo usado en este tutorial
+
+**Online asíncrono** (`online_async_launch.py`) — procesa el LiDAR en tiempo real mientras manejas el F1TENTH en el simulador, priorizando no acumular retraso sobre preservar cada scan. Es el modo recomendado para este caso de uso.
+
+> Aunque sea asíncrono, conviene manejar despacio durante el mapeo — a alta velocidad se reduce el traslape entre scans y el mapa sale con paredes duplicadas/deformadas ("ghosting").
+
+---
+
+## 2. Configurar SLAM Toolbox
+
+### 2.1 Crear carpeta de configuración
+
+```bash
+mkdir -p ~/autodrive/f1tenth_ws/src/config
+```
+
+### 2.2 Copiar la configuración estándar
+
+```bash
+source /opt/ros/humble/setup.bash
+SLAM_SHARE=$(ros2 pkg prefix slam_toolbox)/share/slam_toolbox
+
+cp "$SLAM_SHARE/config/mapper_params_online_async.yaml" \
+   ~/autodrive/f1tenth_ws/src/config/mapper_params_online_async.yaml
+```
+
+### 2.3 Verificar el tópico real del LiDAR
+
+Este paso necesita el simulador y el bridge ya corriendo — si todavía no los has levantado, adelanta las Terminales 1 y 2 de la sección 3 (más abajo) y vuelve aquí.
+
+El tutorial original advierte que AutoDRIVE puede mostrar un tópico `/scan` sin publicador real. En este setup específico, comprobé por código que **`/scan` ni siquiera aparece** en la lista de tópicos — pero igual vale la pena que lo verifiques tú mismo:
+
+```bash
+ros2 topic list | grep -i scan
+```
+
+No debería aparecer nada. El tópico real es:
+
+```bash
+ros2 topic type /autodrive/f1tenth_1/lidar
+```
+
+Resultado esperado:
+
+```text
+sensor_msgs/msg/LaserScan
+```
+
+Inspecciona un mensaje (con el simulador conectado y en modo Autonomous):
+
+```bash
+ros2 topic echo /autodrive/f1tenth_1/lidar --once
+```
+
+Debe incluir:
+
+```yaml
+header:
+  frame_id: lidar
+```
+
+Puedes también revisar el publicador con:
+
+```bash
+ros2 topic info /autodrive/f1tenth_1/lidar -v
+```
+
+Debe mostrar `Publisher count: 1`, con el nodo `autodrive_incoming_bridge`.
+
+### 2.4 Verificar el árbol TF
+
+Con el simulador y el bridge corriendo, genera el árbol TF:
+
+```bash
+ros2 run tf2_tools view_frames
+```
+
+(Si `tf2_tools` no está instalado: `sudo apt install ros-humble-tf2-tools`. Genera un archivo `frames.pdf` en el directorio actual.)
+
+Los frames relevantes son:
+
+- `map`: referencia global fija, publicada por AutoDRIVE.
+- `f1tenth_1`: frame base (móvil) del vehículo.
+- `lidar`: frame del sensor LiDAR.
+
+No existe `base_footprint` en este árbol, y no hace falta — `slam_toolbox` puede usar cualquier frame base válido conectado por TF a la referencia odométrica y al LiDAR. Aquí usamos `f1tenth_1` como base frame (confirmado también por código: `broadcast_transform("f1tenth_1", "map", ...)` y `broadcast_transform("lidar", "f1tenth_1", ...)`).
+
+### 2.5 Editar los parámetros ROS del archivo
+
+```bash
+nano ~/autodrive/f1tenth_ws/src/config/mapper_params_online_async.yaml
+```
+
+Configurar la sección `ros__parameters` así:
+
+```yaml
+slam_toolbox:
+  ros__parameters:
+
+    # ROS Parameters
+    odom_frame: map
+    map_frame: slam_map
+    base_frame: f1tenth_1
+    scan_topic: /autodrive/f1tenth_1/lidar
+    use_map_saver: true
+    mode: mapping # localization
+```
+
+| Parámetro | Por qué este valor |
+|---|---|
+| `odom_frame: map` | AutoDRIVE ya publica `map → f1tenth_1` directamente; ese `map` hace de referencia odométrica. |
+| `map_frame: slam_map` | Nombre distinto al `map` de AutoDRIVE, para no chocar. Cadena TF resultante: `slam_map → map → f1tenth_1 → lidar`. |
+| `base_frame: f1tenth_1` | En el TF tree de AutoDRIVE, sensores/ruedas/encoders cuelgan de `f1tenth_1` — cumple el rol de `base_link`. |
+| `scan_topic: /autodrive/f1tenth_1/lidar` | Único tópico real de LiDAR en este setup (ver nota sobre `/scan` arriba). |
+| `use_map_saver: true` | Habilita guardar el mapa como `.pgm` + `.yaml` compatibles con `map_server`. |
+| `mode: mapping` | Construye y actualiza el mapa continuamente (vs. `localization`, que usa un mapa ya guardado). |
+
+Guardar en `nano`: `Ctrl+O`, `Enter`, `Ctrl+X`.
+
+---
+
+## 3. Levantar todo en el orden correcto
+
+El orden importa porque el LiDAR y el TF deben empezar a llegar antes de arrancar SLAM.
+
+### Terminal 1 — Simulador
+
+```bash
+cd ~/autodrive/f1tenth_ws/simulator
+./run_with_nvidia.sh
+```
+
+Usa siempre `run_with_nvidia.sh`, no el binario a secas (`AutoDRIVE Simulator.x86_64`) — en laptops con GPU NVIDIA + Optimus/PRIME (configuración común), sin este wrapper todo corre en la GPU integrada por defecto, mucho más lento. Detalle en `CLAUDE.md`, gotcha #8.
+
+En el simulador: click en el ícono de antena hasta que diga **Connected**, verificar modo **Autonomous**.
+
+### Terminal 2 — Bridge
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 launch autodrive_f1tenth simulator_bringup_rviz.launch.py
+```
+
+En el simulador: conectar la antena, verificar modo Autonomous. Este comando ya abre RViz — no hace falta lanzarlo de nuevo más adelante, lo vamos a configurar más abajo una vez que `slam_toolbox` esté publicando `/map`.
+
+**Antes de seguir**, en el panel de Displays de RViz (izquierda): destildá o borrá el display **Camera** (sobre `front_camera`) si está activo. Esa sola suscripción hace que `autodrive_incoming_bridge` decodifique cada frame de cámara — el paso más caro de su callback — y se sature tanto que se cae de `ros2 node list` sin avisar, arrastrando LiDAR/TF con él (detalle en el punto 7 de "Diferencias", arriba).
+
+### Esperar 3-5 segundos
+
+Deja que el bridge empiece a publicar `/tf`, `/tf_static` y `/autodrive/f1tenth_1/lidar` antes de continuar.
+
+> No reinicies Unity mientras `slam_toolbox` esté corriendo — puede generar warnings `TF_OLD_DATA`.
+
+### Terminal 3 — Teleoperación
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run autodrive_f1tenth teleop_keyboard
+```
+
+No muevas el auto todavía — primero arranca y verifica `slam_toolbox`.
+
+> **Alternativa para mapear sin manos (19/08/2026):** `ros2 run controllers gap_node` en vez de `teleop_keyboard` — implementa Follow The Gap (FTG), un algoritmo de navegación reactiva: en cada scan del LiDAR busca el hueco libre más grande frente al auto y se dirige a su centro, sin necesitar un mapa ni un humano manejando. Portado de [follow-the-gap-f1tenth](https://github.com/hector-la/follow-the-gap-f1tenth) y ya tuneado para este circuito (velocidad baja a propósito — mapear rápido genera drift y deforma el mapa). Ctrl+C o `kill <pid>` (sin `-9`) frenan el auto de forma segura antes de matar el nodo, no queda girando/acelerando solo. Ver `CLAUDE.md`, sección "Adding a Controller Node".
+
+### Terminal 4 — SLAM Toolbox
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+CFG=$(realpath ./src/config/mapper_params_online_async.yaml)
+
+ros2 launch slam_toolbox online_async_launch.py \
+  slam_params_file:=$CFG \
+  use_sim_time:=true
+```
+
+**Nota:** `use_sim_time:=true` — ver punto 2 de las diferencias arriba. Antes de lanzar, confirma que no quede un `slam_toolbox` viejo corriendo de una sesión anterior (`ps aux | grep slam_toolbox`) — dos instancias vivas a la vez compiten por publicar `/map` y parece que "el mapa se congeló".
+
+### Configurar RViz
+
+En la misma ventana de RViz que abrió la Terminal 2 (no hace falta abrir otra): configurá `Fixed Frame` = `slam_map`, agregá un display `Map` suscrito al tópico `/map`, y (opcional) `LaserScan` sobre `/autodrive/f1tenth_1/lidar` para ver el LiDAR en vivo mientras mapeas.
+
+Ahora sí, maneja despacio por el circuito (Terminal 3 — `teleop_keyboard` o `gap_node`) y observa el mapa formarse en RViz.
+
+**Da 2-3 vueltas completas antes de guardar, no cortes apenas cierra la primera.** Vas a notar que al completar la primera vuelta, justo donde el auto vuelve cerca del punto de partida, el mapa "salta" o se ve desfasado entre el inicio y el final — eso es normal, no un error. Es el **loop closure**: mientras das la vuelta, `slam_toolbox` va encadenando cada scan nuevo contra el anterior (scan matching local), y ese emparejamiento tiene un pequeño error cada vez que se va acumulando (drift). Cuando el auto vuelve a pasar cerca de una zona ya mapeada, `slam_toolbox` la reconoce y corre una optimización global de todo el grafo de poses que "engancha" el final con el inicio — ese salto que ves es esa corrección funcionando, no rompiéndose. Necesita juntar varios scans en la zona de cierre antes de confiar en el match, así que **no pares justo ahí** — un par de vueltas extra le dan más para afinar el cierre y el desfase final queda mucho menor.
+
+---
+
+## 4. Guardar el mapa
+
+Guarda dos cosas distintas, con roles distintos — vale la pena guardar ambas:
+
+| Qué | Formato | Para qué sirve |
+|---|---|---|
+| Mapa estático | `.pgm` (imagen) + `.yaml` (metadata) | Formato estándar de ROS/Nav2. Sirve para **localización** sobre un mapa ya terminado (por ejemplo con AMCL), o simplemente para visualizarlo después. Es una foto final, no se puede "continuar mapeando" a partir de él. |
+| Pose-graph | `.data` + `.posegraph` | Formato nativo de `slam_toolbox` — el grafo completo de poses y scans que usó para construir el mapa. Sirve para **retomar el mapeo** más adelante sin perder todo el trabajo de scan matching ya hecho. |
+
+**No mates `slam_toolbox` para guardar** — tiene que seguir corriendo y publicando `/map`. Podés parar el nodo que estaba manejando (Terminal 3, `teleop_keyboard` o `gap_node`) sin problema.
+
+### 4.1 Crear carpeta de mapas
+
+```bash
+mkdir -p ~/autodrive/f1tenth_ws/maps
+```
+
+### 4.2 Guardar el mapa estático (`.pgm` + `.yaml`)
+
+Abre un quinto terminal:
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run nav2_map_server map_saver_cli -f maps/F1tenth_Map
+```
+
+Este comando se suscribe al tópico `/map` (el que publica `slam_toolbox` en vivo) y guarda lo que reciba. Espera a ver:
+
+```text
+[INFO] [map_saver]: Map saved successfully
+```
+
+Vas a ver también un par de `WARN` sobre "Free/Occupied threshold unspecified" e "Image format unspecified" — son solo avisos de que usó los valores por defecto de ROS (que están bien para este caso), no errores.
+
+Deben generarse:
+
+```text
+maps/F1tenth_Map.pgm
+maps/F1tenth_Map.yaml
+```
+
+### 4.3 Guardar el pose-graph nativo
+
+Mismo terminal:
+
+```bash
+ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph \
+  "{filename: '$HOME/autodrive/f1tenth_ws/maps/F1tenth_Map_posegraph'}"
+```
+
+⚠️ Este servicio necesita **ruta absoluta** — a diferencia de `map_saver_cli`, que arriba aceptó una ruta relativa (`maps/...`), acá hace falta la ruta completa. `$HOME` la arma sola con tu usuario (no hace falta escribir `/home/tu_usuario/...` a mano). La respuesta esperada:
+
+```text
+response:
+slam_toolbox.srv.SerializePoseGraph_Response(result=0)
+```
+
+`result=0` significa éxito (no es un código de error).
+
+Verificar que los cuatro archivos existan:
+
+```bash
+ls -lh ~/autodrive/f1tenth_ws/maps
+```
+
+---
+
+## 5. Volver a cargar el mapa guardado en RViz
+
+Esto sirve para revisar un mapa ya guardado sin tener que mapear de nuevo — por ejemplo, para mostrárselo a alguien o confirmar que quedó bien. **No hace falta `slam_toolbox` corriendo para esto**, solo el archivo `.pgm`/`.yaml` ya guardado.
+
+### 5.1 Levantar el nodo `map_server`
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run nav2_map_server map_server --ros-args -p yaml_filename:=$(pwd)/maps/F1tenth_Map.yaml
+```
+
+`map_server` es un **lifecycle node**: un tipo de nodo de ROS 2 que arranca en un estado "sin configurar" y no hace nada hasta que alguien lo lleva explícitamente por sus estados (`configure` → `activate`). Esto es deliberado en Nav2 — evita que un nodo empiece a publicar datos a medio inicializar. Vas a ver que el comando de arriba se queda esperando, sin publicar nada todavía — es normal.
+
+### 5.2 Activarlo
+
+En otro terminal (mismo `source` de siempre):
+
+```bash
+ros2 lifecycle set /map_server configure
+ros2 lifecycle set /map_server activate
+```
+
+Recién después de `activate`, el nodo lee el `.pgm`/`.yaml` y empieza a publicar `/map`.
+
+### 5.3 Agregar el display en RViz
+
+Si RViz ya está abierto: panel izquierdo, botón **Add** → pestaña "By display type" → `Map` → OK. En sus propiedades, **Topic** = `/map`. Y en **Global Options → Fixed Frame**, poné `map` (el frame con el que `map_server` publica por defecto).
+
+**Nota si no aparece nada:** `map_server` publica `/map` con QoS `TRANSIENT_LOCAL` — un mensaje "latcheado" que se manda una sola vez al activar, y queda en caché para quien se suscriba después. Si tu display de RViz ya estaba agregado *antes* de correr `activate` en el paso 5.2, a veces su suscripción queda con QoS `VOLATILE`, que en DDS **no recibe ese histórico cacheado** — solo mensajes publicados a partir de que se suscribió. Se ve como si el mapa nunca cargara. Arreglo rápido, sin tocar nada de RViz — forzar una publicación nueva con RViz ya suscrito:
+
+```bash
+ros2 lifecycle set /map_server deactivate
+ros2 lifecycle set /map_server activate
+```
+
+### 5.4 Apagarlo al terminar
+
+`Ctrl+C` en el terminal del paso 5.1. **No lo dejes corriendo de fondo** — un `map_server` (o cualquier nodo de localización de Nav2) huérfano de una sesión vieja puede competir por publicar `/map` con un `slam_toolbox` de una sesión de mapeo futura y hacer que el mapa se vea desfasado, aunque el mapeo en sí esté sano. Antes de arrancar una sesión de mapeo nueva, conviene chequear `ps aux | grep -E "map_server|lifecycle_manager"` y confirmar que no quedó nada de una vez anterior.
+
+---
+
+## Resumen del orden de arranque
+
+```text
+1. Simulador AutoDRIVE (~/autodrive/f1tenth_ws/simulator, run_with_nvidia.sh)
+2. Bridge ROS 2 con RViz incluido (Camera display OFF)
+3. Esperar 3-5 segundos
+4. Teleoperación (teleop_keyboard o gap_node)
+5. SLAM Toolbox con use_sim_time:=true
+6. Configurar RViz (Fixed Frame=slam_map, display Map) y manejar despacio, 2-3 vueltas completas
+7. Guardar el mapa (mapa .pgm/.yaml + pose-graph)
+8. (Opcional) Volver a cargarlo en RViz con map_server
+```
+
+Versión solo-comandos, sin explicación, para consulta rápida: `Laboratories/SLAM_Comandos_Rapidos.md`.
+
+## Troubleshooting: `slam_map` no aparece en Fixed Frame
+
+Checklist en orden, de más simple a más específico:
+
+| # | Comando | Qué confirma |
+|---|---|---|
+| 1 | `ros2 node list \| grep slam` y `ps aux \| grep slam_toolbox` | `slam_toolbox` está corriendo de verdad. Revisar **ambos** — un nodo puede seguir apareciendo en `ros2 node list` por un rato aunque el proceso ya haya muerto, y al revés, `kill` a veces no mata el proceso a la primera (revisar con `ps`). |
+| 2 | `ros2 topic hz /autodrive/f1tenth_1/lidar` | El LiDAR llega a una tasa razonable (varios Hz). Si sale muy bajo (ej. ~0.5 Hz) o no sale nada, `slam_toolbox` no va a poder procesarlo a tiempo — no tiene caso seguir revisando los pasos de abajo hasta resolver esto. |
+| 3 | `ros2 topic echo /rosout` (dejar corriendo unos segundos) | Si ves repetido `Message Filter dropping message... earlier than all the data in the transform cache`, es la señal exacta de que el TF llega demasiado tarde — el mapa nunca se va a formar aunque todo lo demás esté bien. |
+| 4 | `ros2 run tf2_ros tf2_echo map slam_map` | Si `slam_toolbox` está calculando el mapa, esto imprime la transformación constantemente. Si se queda esperando ("waiting for transform"), no está publicando nada. |
+| 5 | `ros2 topic hz /map` | Confirma que el tópico del mapa en sí se está actualizando. |
+| 6 | En RViz, abrir el dropdown de **Fixed Frame** | Solo lista frames que RViz ya vio pasar por TF al menos una vez — si `slam_map` no aparece ahí, es porque nunca llegó, no que RViz lo esté ocultando. |
+
+**Caso real documentado (04/08 → 19/08/2026), con el desenlace completo:**
+
+Primer hallazgo (04/08): en esta máquina, el paso 2 mostraba solo ~0.5 Hz de LiDAR (a veces 1 mensaje cada 4s) por una GPU NVIDIA sin driver cargado — todo corría sobre la GPU integrada AMD. `slam_toolbox` sí aparecía vivo (paso 1) y sí recibía *algo* de LiDAR, pero el paso 3 mostraba drops constantes. Se asumió que esa era toda la causa.
+
+Continuación (19/08): se arregló el driver NVIDIA de raíz (`CLAUDE.md` gotcha #8 — no era "falta instalar", era un conflicto de paquetes `nvidia-driver-570`/`580` instalados a la vez). El LiDAR mejoró a ~1-3.5 Hz. **El paso 3 seguía mostrando los mismos drops, sin excepción.** Eso fue la señal de que la GPU nunca fue la causa completa. La causa real: `use_sim_time:=false` en el comando de `slam_toolbox` (punto 2 de las diferencias, arriba) — cambiar solo ese flag a `true` resolvió el paso 4 (`tf2_echo`) de inmediato, sin tocar nada más.
+
+Lección para el checklist de arriba: si el paso 3 muestra el error de "timestamp earlier than transform cache" de forma **persistente y sin excepción** (no ocasional), sospecha primero de `use_sim_time` antes que de la velocidad del simulador — un simulador lento genera drops *intermitentes*, no un descarte total y permanente. Detalle completo en `CLAUDE.md` (gotchas #6, #8, #9, #11).
+
+## Referencias
+
+- [Tutorial original (nabihandres/AUTODRIVE)](https://github.com/nabihandres/AUTODRIVE/blob/main/Tutorial%203%3A%20Simultaneous%20Localization%20and%20Maping.md)
+- [Documentación SLAM Toolbox (ROS 2 Humble)](https://docs.ros.org/en/humble/p/slam_toolbox/)
+- [Repositorio oficial SLAM Toolbox](https://github.com/SteveMacenski/slam_toolbox)
