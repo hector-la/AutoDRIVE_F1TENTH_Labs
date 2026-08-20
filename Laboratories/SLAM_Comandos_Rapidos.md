@@ -123,72 +123,14 @@ ros2 lifecycle set /map_server activate
 
 ---
 
-## Parte 4 — Ver el mapa automáticamente al abrir RViz (opcional, una sola vez)
+## Parte 4 — Ver el mapa automáticamente al abrir RViz (opcional)
 
-Para no repetir la Parte 3 a mano cada vez. Bundlea bridge + RViz + el mapa activado en un solo comando. ⚠️ No usar junto con `slam_toolbox` mapeando (mismo problema de dos publishers de `/map` compitiendo).
+`src/controllers/launch/bridge_with_map.launch.py` ya viene incluido en el repo (se copió junto con `src/controllers/` en el setup) — bundlea bridge + RViz + el mapa activado en un solo comando, así no repetís la Parte 3 a mano cada vez. ⚠️ No usar junto con `slam_toolbox` mapeando (mismo problema de dos publishers de `/map` compitiendo). Tiene un delay de 5s a propósito antes de arrancar `map_server`, para que RViz llegue a suscribirse antes de que salga su única publicación (si no, es una carrera y a veces el mapa nunca aparece).
 
-### 4.1 Crear el launch file
-```bash
-mkdir -p ~/autodrive/f1tenth_ws/src/controllers/launch
-nano ~/autodrive/f1tenth_ws/src/controllers/launch/bridge_with_map.launch.py
-```
-```python
-#!/usr/bin/env python3
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, TimerAction
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
-
-
-def generate_launch_description():
-    map_yaml_arg = DeclareLaunchArgument(
-        'map',
-        description='Ruta absoluta al .yaml del mapa guardado'
-    )
-
-    incoming_bridge = Node(
-        package='autodrive_f1tenth', executable='autodrive_incoming_bridge',
-        name='autodrive_incoming_bridge', emulate_tty=True, output='screen',
-    )
-    outgoing_bridge = Node(
-        package='autodrive_f1tenth', executable='autodrive_outgoing_bridge',
-        name='autodrive_outgoing_bridge', emulate_tty=True, output='screen',
-    )
-    rviz = Node(
-        package='rviz2', executable='rviz2', name='rviz',
-        arguments=['-d', [FindPackageShare('autodrive_f1tenth'), '/rviz', '/simulator.rviz']],
-    )
-    map_server = Node(
-        package='nav2_map_server', executable='map_server', name='map_server',
-        output='screen', parameters=[{'yaml_filename': LaunchConfiguration('map')}],
-    )
-    lifecycle_manager = Node(
-        package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager_map',
-        output='screen', parameters=[{'autostart': True, 'node_names': ['map_server']}],
-    )
-
-    return LaunchDescription([
-        map_yaml_arg, incoming_bridge, outgoing_bridge, rviz,
-        # map_server publica /map una sola vez, al activarse. Si RViz aun no
-        # se suscribio en ese instante, se pierde ese mensaje para siempre
-        # (QoS VOLATILE del display Map no recibe historico de un TRANSIENT_LOCAL).
-        # Por eso el delay: le da tiempo a RViz de suscribirse primero.
-        TimerAction(period=5.0, actions=[map_server, lifecycle_manager]),
-    ])
-```
-
-### 4.2 Registrar en `setup.py`
-Agregar `import os` + `from glob import glob` arriba, y en `data_files`:
-```python
-(os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
-```
-
-### 4.3 Compilar y correr
+### 4.1 Correr
 ```bash
 cd ~/autodrive/f1tenth_ws
-source venv/bin/activate && source /opt/ros/humble/setup.bash
-colcon build --symlink-install && source install/setup.bash
+source venv/bin/activate && source /opt/ros/humble/setup.bash && source install/setup.bash
 
 ros2 launch controllers bridge_with_map.launch.py map:=$(pwd)/maps/<nombre>.yaml
 ```

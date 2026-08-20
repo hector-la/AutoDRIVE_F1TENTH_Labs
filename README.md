@@ -43,8 +43,10 @@ head -1 install/controllers/lib/controllers/gap_node
 ```
 src/
 ├── controllers/         # paquete ROS 2 con el nodo de control
-│   └── controllers/
-│       └── gap_node.py      # Follow The Gap — navegación reactiva autónoma, para mapear sin manos
+│   ├── controllers/
+│   │   └── gap_node.py      # Follow The Gap — navegación reactiva autónoma, para mapear sin manos
+│   └── launch/
+│       └── bridge_with_map.launch.py   # bridge + RViz + mapa guardado, en un solo comando (Lab 3)
 └── config/
     └── mapper_params_online_async.yaml   # config de slam_toolbox para este setup
 
