@@ -12,7 +12,7 @@ Si ya tenés `~/autodrive/f1tenth_ws` compilado y ese teleop funcionando, andá 
 
 ## Cómo usar este repo
 
-Copiá (o cloná y copiá) las carpetas de este repo dentro de tu workspace:
+Son 4 comandos, uno atrás del otro, sin cambiar de carpeta entre medio (los `cp -r` usan rutas relativas a donde clonaste). Parate en cualquier carpeta que **no** sea `~/autodrive/f1tenth_ws` (por ejemplo tu home, `cd ~`) y corré:
 
 ```bash
 git clone https://github.com/hector-la/AutoDRIVE_F1TENTH_Labs.git
@@ -20,6 +20,8 @@ cp -r AutoDRIVE_F1TENTH_Labs/src/controllers ~/autodrive/f1tenth_ws/src/
 cp -r AutoDRIVE_F1TENTH_Labs/src/config ~/autodrive/f1tenth_ws/src/
 cp -r AutoDRIVE_F1TENTH_Labs/Laboratories ~/autodrive/f1tenth_ws/
 ```
+
+El primero (`git clone`) descarga el repo entero a una carpeta nueva `AutoDRIVE_F1TENTH_Labs/`. Los otros tres copian, cada uno, solo la carpeta puntual que necesitás dentro de tu workspace real. Una vez copiado, la carpeta clonada ya no hace falta — podés borrarla si querés (`rm -rf AutoDRIVE_F1TENTH_Labs`), tu workspace ya tiene su propia copia independiente.
 
 Después:
 
