@@ -368,6 +368,160 @@ ros2 lifecycle set /map_server activate
 
 ---
 
+## 6. Ver el mapa automáticamente cada vez que abrís RViz (opcional)
+
+La sección 5 sirve para revisar el mapa una vez, a mano. Si en cambio querés tenerlo **de fondo mientras manejás o probás cosas** (sin mapear de nuevo), conviene armar un launch file propio que levante bridge + RViz + el mapa ya activado, todo en un solo comando — en vez de escribir 5 comandos en 3 terminales cada vez.
+
+⚠️ **No uses esto al mismo tiempo que `slam_toolbox` mapeando** — dos nodos publicando `/map` a la vez compiten entre sí y el mapa termina viéndose desfasado, aunque cada uno por separado esté sano. Es para manejar/probar viendo el mapa ya hecho, no para mapear de nuevo.
+
+### 6.1 Crear la carpeta de launch files
+
+```bash
+mkdir -p ~/autodrive/f1tenth_ws/src/controllers/launch
+```
+
+### 6.2 Crear el launch file
+
+```bash
+nano ~/autodrive/f1tenth_ws/src/controllers/launch/bridge_with_map.launch.py
+```
+
+```python
+#!/usr/bin/env python3
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+
+
+def generate_launch_description():
+    map_yaml_arg = DeclareLaunchArgument(
+        'map',
+        description='Ruta absoluta al .yaml del mapa guardado'
+    )
+
+    # --- Bridge de AutoDRIVE + RViz (igual que simulator_bringup_rviz.launch.py) ---
+    incoming_bridge = Node(
+        package='autodrive_f1tenth',
+        executable='autodrive_incoming_bridge',
+        name='autodrive_incoming_bridge',
+        emulate_tty=True,
+        output='screen',
+    )
+    outgoing_bridge = Node(
+        package='autodrive_f1tenth',
+        executable='autodrive_outgoing_bridge',
+        name='autodrive_outgoing_bridge',
+        emulate_tty=True,
+        output='screen',
+    )
+    rviz = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz',
+        arguments=['-d', [FindPackageShare('autodrive_f1tenth'), '/rviz', '/simulator.rviz']],
+    )
+
+    # --- Mapa guardado, activado automáticamente ---
+    map_server = Node(
+        package='nav2_map_server',
+        executable='map_server',
+        name='map_server',
+        output='screen',
+        parameters=[{'yaml_filename': LaunchConfiguration('map')}],
+    )
+    lifecycle_manager = Node(
+        package='nav2_lifecycle_manager',
+        executable='lifecycle_manager',
+        name='lifecycle_manager_map',
+        output='screen',
+        parameters=[{
+            'autostart': True,
+            'node_names': ['map_server'],
+        }],
+    )
+
+    return LaunchDescription([
+        map_yaml_arg,
+        incoming_bridge,
+        outgoing_bridge,
+        rviz,
+        # map_server publica /map una sola vez, al activarse — si RViz todavía no
+        # se termino de suscribir en ese instante, se pierde ese mensaje para
+        # siempre (el display Map de RViz usa QoS VOLATILE, que no recibe el
+        # historico cacheado de un publisher TRANSIENT_LOCAL como map_server,
+        # solo lo que se publique despues de que ya esta suscripto). Por eso
+        # retrasamos map_server/lifecycle_manager unos segundos: le da tiempo a
+        # RViz de arrancar y suscribirse ANTES de que salga esa unica publicacion.
+        TimerAction(period=5.0, actions=[map_server, lifecycle_manager]),
+    ])
+```
+
+`autostart: True` en el `lifecycle_manager` reemplaza los `ros2 lifecycle set ... configure/activate` manuales de la sección 5 — los dispara solo. El `TimerAction` de 5 segundos es la parte importante: sin él, todo arranca al mismo tiempo y hay una carrera — a veces RViz no llega a suscribirse antes de que `map_server` publique su único mensaje, y el mapa nunca aparece (avisa "No map received" en el display, sin ningún error de código de por medio). Retrasando `map_server`, RViz siempre gana esa carrera.
+
+### 6.3 Registrar el launch file en `setup.py`
+
+```bash
+nano ~/autodrive/f1tenth_ws/src/controllers/setup.py
+```
+
+Agregar `import os` y `from glob import glob` arriba, y una línea nueva en `data_files`:
+
+```python
+import os
+from glob import glob
+from setuptools import find_packages, setup
+
+package_name = 'controllers'
+
+setup(
+    ...
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),   # ← nueva
+    ],
+    ...
+)
+```
+
+### 6.4 Compilar
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate && source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+### 6.5 Correrlo
+
+Con el simulador ya abierto y conectado (Terminal 1, como siempre):
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate && source /opt/ros/humble/setup.bash && source install/setup.bash
+ros2 launch controllers bridge_with_map.launch.py map:=$(pwd)/maps/F1tenth_Map.yaml
+```
+
+Un solo comando levanta bridge + RViz + el mapa (con el delay de 5 segundos, así que no te alarmes si tarda un toque en aparecer).
+
+### 6.6 Agregar el display una vez y guardarlo para no repetirlo
+
+En RViz: `Add` → `Map` → Topic `/map` (el `Fixed Frame` va a ser `map`, el mismo que usa AutoDRIVE — el mapa queda alineado con el auto en vivo). Después, `File → Save Config As...` sobre el mismo archivo que usa el launch (`~/autodrive/f1tenth_ws/src/autodrive_ros2/autodrive_f1tenth/rviz/simulator.rviz`), para que la próxima vez ya abra con el display puesto.
+
+**De acá en adelante, para abrir RViz con el mapa ya cargado de fondo, usá este comando** (Terminal 2, en vez de `simulator_bringup_rviz.launch.py`):
+
+```bash
+ros2 launch controllers bridge_with_map.launch.py map:=$(pwd)/maps/F1tenth_Map.yaml
+```
+
+Para una sesión de **mapeo nuevo** (con `slam_toolbox`), seguí usando `simulator_bringup_rviz.launch.py` como en la sección 3 — no mezcles los dos.
+
+---
+
 ## Resumen del orden de arranque
 
 ```text
@@ -379,6 +533,8 @@ ros2 lifecycle set /map_server activate
 6. Configurar RViz (Fixed Frame=slam_map, display Map) y observar, 2-3 vueltas completas
 7. Guardar el mapa (mapa .pgm/.yaml + pose-graph)
 8. (Opcional) Volver a cargarlo en RViz con map_server
+9. (Opcional, una sola vez) Armar bridge_with_map.launch.py — de ahí en más, para abrir RViz con el mapa ya cargado de fondo (sin mapear de nuevo), el comando es:
+   ros2 launch controllers bridge_with_map.launch.py map:=<ruta al .yaml>
 ```
 
 Versión solo-comandos, sin explicación, para consulta rápida: `Laboratories/SLAM_Comandos_Rapidos.md`.
