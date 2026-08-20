@@ -51,7 +51,7 @@ Laboratories/
 └── SLAM_Comandos_Rapidos.md      # la misma guía, solo comandos, para consulta rápida
 ```
 
-## Labs
+## Laboratorios
 
 - **Lab 3 — SLAM (mapeo 2D):** [`Laboratories/Tutorial_3_SLAM.md`](Laboratories/Tutorial_3_SLAM.md) — instalás `slam_toolbox`, levantás simulador + bridge + `slam_toolbox` + `gap_node` (maneja solo, no hace falta teleop), mapeás el circuito, y guardás el mapa (imagen `.pgm`/`.yaml` + pose-graph nativo de `slam_toolbox`). Explicado paso a paso, con el porqué de cada comando.
   - Versión solo-comandos, para cuando ya hiciste el lab una vez y no necesitás la explicación: [`Laboratories/SLAM_Comandos_Rapidos.md`](Laboratories/SLAM_Comandos_Rapidos.md).

@@ -2,17 +2,6 @@
 
 Adaptado de [Tutorial 3 de nabihandres/AUTODRIVE](https://github.com/nabihandres/AUTODRIVE/blob/main/Tutorial%203%3A%20Simultaneous%20Localization%20and%20Maping.md) a la estructura real de este workspace (`~/autodrive/f1tenth_ws`).
 
-## ⚠️ Diferencias respecto al tutorial original (leer antes de empezar)
-
-1. **Rutas.** El tutorial original asume `~/autodrive_ws` y el simulador en `~/Downloads/AutoDRIVE_Sim`. Aquí todo vive en `~/autodrive/f1tenth_ws` (workspace + venv + simulador consolidados, ver `README.md` del repo).
-2. **`use_sim_time:=true`, tal como pide el tutorial original — a pesar de que el bridge no publica `/clock`.** ⚠️ Esto se documentó al revés hasta el 19/08/2026 (esta misma nota decía `false`, razonando que `true` se quedaría esperando un `/clock` que nunca llega). Esa lógica sonaba bien pero era **incorrecta en la práctica**: probado directo con `tf2_ros` (no solo "se ve en RViz"), con `use_sim_time:=false` `slam_toolbox` descarta **cada scan de LiDAR, siempre**, con el error `"the timestamp on the message is earlier than all the data in the transform cache"` — sin importar qué tan sano esté el resto del pipeline. Cambiando solo ese flag a `true`, sin tocar nada más, el transform `slam_map → lidar` empezó a resolver de inmediato. El bridge (`autodrive_incoming_bridge.py`) sigue sin publicar `/clock` y sigue usando `get_clock().now()` (hora real) para todos sus timestamps — eso no cambió. El mecanismo exacto de por qué `slam_toolbox` necesita `true` de todos modos no está confirmado a nivel de código (probablemente es cómo maneja sus propios timeouts internos, no que reciba tiempo de simulación real), pero el fix es reproducible. Detalle en `CLAUDE.md`, gotcha #6.
-3. **No existe `/scan`.** En este setup, la lista de tópicos no incluye `/scan` en absoluto (ni siquiera como tópico sin publicador, como sugiere el tutorial original) — solo existe `/autodrive/f1tenth_1/lidar`. El paso 2.3 de abajo te deja comprobarlo tú mismo.
-4. **Frames TF confirmados por código**, pero igual verificables por ti en el paso 2.4 — `map → f1tenth_1 → lidar` coincide con lo que ya revisé en `autodrive_incoming_bridge.py` (`broadcast_transform("f1tenth_1", "map", ...)`, `broadcast_transform("lidar", "f1tenth_1", ...)`), así que la configuración de frames del tutorial original aplica tal cual.
-5. **No hace falta `PYTHONPATH` ni ningún otro workaround** — ya está resuelto de raíz (ver README del repo).
-6. **Requiere que el simulador corra a buen ritmo** — pero cuidado con el diagnóstico. Un simulador lento (LiDAR a <1 Hz) sí perjudica SLAM, y hasta el 19/08/2026 se creía que ESA era la causa completa del bloqueo (GPU NVIDIA sin driver). Resultó ser un problema real pero separado del bloqueo total: el driver se arregló, el LiDAR mejoró a ~1-3.5 Hz, y `slam_toolbox` **seguía** descartando cada scan — la causa de fondo era el punto 2 de arriba (`use_sim_time`). No asumas que es la GPU sin antes revisar el punto 2.
-7. **La cámara frontal en RViz puede tumbar el nodo del bridge sin avisar.** Si `simulator_bringup_rviz.launch.py` trae un display de Camera activo sobre `front_camera`, esa sola suscripción hace que `autodrive_incoming_bridge` decodifique cada frame (el paso más caro de su callback) y se sature tanto que desaparece de `ros2 node list` — sigue vivo como proceso, solo que muy ocupado para anunciarse. Si ni siquiera ves el nodo del bridge (no solo scans descartados), desmarca esa Camera en RViz antes de seguir. Ver `CLAUDE.md`, gotcha #9.
-8. **Guardar y volver a cargar el mapa** no se hace desde el panel de RViz (el tutorial original usa el plugin `SlamToolboxPlugin`, que puede no estar disponible en tu config) — acá se usa la CLI de `nav2_map_server`, más portable. Ver secciones 4 y 5, más abajo.
-
 ## Prerrequisitos
 
 - `~/autodrive/f1tenth_ws` compilado y validado (simulador + bridge + teleop funcionando). Si no, seguir primero [AutoDRIVE_DevKit_Starter](https://github.com/hector-la/AutoDRIVE_DevKit_Starter).
@@ -177,7 +166,7 @@ cd ~/autodrive/f1tenth_ws/simulator
 ./run_with_nvidia.sh
 ```
 
-Usa siempre `run_with_nvidia.sh`, no el binario a secas (`AutoDRIVE Simulator.x86_64`) — en laptops con GPU NVIDIA + Optimus/PRIME (configuración común), sin este wrapper todo corre en la GPU integrada por defecto, mucho más lento. Detalle en `CLAUDE.md`, gotcha #8.
+Usa siempre `run_with_nvidia.sh`, no el binario a secas (`AutoDRIVE Simulator.x86_64`) — en laptops con GPU NVIDIA + Optimus/PRIME (configuración común), sin este wrapper todo corre en la GPU integrada por defecto, mucho más lento.
 
 En el simulador: click en el ícono de antena hasta que diga **Connected**, verificar modo **Autonomous**.
 
@@ -194,7 +183,7 @@ ros2 launch autodrive_f1tenth simulator_bringup_rviz.launch.py
 
 En el simulador: conectar la antena, verificar modo Autonomous. Este comando ya abre RViz — no hace falta lanzarlo de nuevo más adelante, lo vamos a configurar más abajo una vez que `slam_toolbox` esté publicando `/map`.
 
-**Antes de seguir**, en el panel de Displays de RViz (izquierda): destildá o borrá el display **Camera** (sobre `front_camera`) si está activo. Esa sola suscripción hace que `autodrive_incoming_bridge` decodifique cada frame de cámara — el paso más caro de su callback — y se sature tanto que se cae de `ros2 node list` sin avisar, arrastrando LiDAR/TF con él (detalle en el punto 7 de "Diferencias", arriba).
+**Antes de seguir**, en el panel de Displays de RViz (izquierda): destildá o borrá el display **Camera** (sobre `front_camera`) si está activo. Esa sola suscripción hace que `autodrive_incoming_bridge` decodifique cada frame de cámara — el paso más caro de su callback — y se sature tanto que se cae de `ros2 node list` sin avisar, arrastrando LiDAR/TF con él.
 
 ### Esperar 3-5 segundos
 
@@ -215,7 +204,7 @@ ros2 run autodrive_f1tenth teleop_keyboard
 
 No muevas el auto todavía — primero arranca y verifica `slam_toolbox`.
 
-> **Alternativa para mapear sin manos (19/08/2026):** `ros2 run controllers gap_node` en vez de `teleop_keyboard` — implementa Follow The Gap (FTG), un algoritmo de navegación reactiva: en cada scan del LiDAR busca el hueco libre más grande frente al auto y se dirige a su centro, sin necesitar un mapa ni un humano manejando. Portado de [follow-the-gap-f1tenth](https://github.com/hector-la/follow-the-gap-f1tenth) y ya tuneado para este circuito (velocidad baja a propósito — mapear rápido genera drift y deforma el mapa). Ctrl+C o `kill <pid>` (sin `-9`) frenan el auto de forma segura antes de matar el nodo, no queda girando/acelerando solo. Ver `CLAUDE.md`, sección "Adding a Controller Node".
+> **Alternativa para mapear sin manos:** `ros2 run controllers gap_node` en vez de `teleop_keyboard` — implementa Follow The Gap (FTG), un algoritmo de navegación reactiva: en cada scan del LiDAR busca el hueco libre más grande frente al auto y se dirige a su centro, sin necesitar un mapa ni un humano manejando. Ya tuneado para este circuito (velocidad baja a propósito — mapear rápido genera drift y deforma el mapa). Ctrl+C o `kill <pid>` (sin `-9`) frenan el auto de forma segura antes de matar el nodo, no queda girando/acelerando solo.
 
 ### Terminal 4 — SLAM Toolbox
 
@@ -232,7 +221,7 @@ ros2 launch slam_toolbox online_async_launch.py \
   use_sim_time:=true
 ```
 
-**Nota:** `use_sim_time:=true` — ver punto 2 de las diferencias arriba. Antes de lanzar, confirma que no quede un `slam_toolbox` viejo corriendo de una sesión anterior (`ps aux | grep slam_toolbox`) — dos instancias vivas a la vez compiten por publicar `/map` y parece que "el mapa se congeló".
+**Nota:** `use_sim_time:=true` es obligatorio acá, aunque el bridge de AutoDRIVE no publique `/clock` — con `false`, `slam_toolbox` descarta todos los scans de LiDAR con el error `"the timestamp on the message is earlier than all the data in the transform cache"`. Antes de lanzar, confirma que no quede un `slam_toolbox` viejo corriendo de una sesión anterior (`ps aux | grep slam_toolbox`) — dos instancias vivas a la vez compiten por publicar `/map` y parece que "el mapa se congeló".
 
 ### Configurar RViz
 
@@ -388,13 +377,7 @@ Checklist en orden, de más simple a más específico:
 | 5 | `ros2 topic hz /map` | Confirma que el tópico del mapa en sí se está actualizando. |
 | 6 | En RViz, abrir el dropdown de **Fixed Frame** | Solo lista frames que RViz ya vio pasar por TF al menos una vez — si `slam_map` no aparece ahí, es porque nunca llegó, no que RViz lo esté ocultando. |
 
-**Caso real documentado (04/08 → 19/08/2026), con el desenlace completo:**
-
-Primer hallazgo (04/08): en esta máquina, el paso 2 mostraba solo ~0.5 Hz de LiDAR (a veces 1 mensaje cada 4s) por una GPU NVIDIA sin driver cargado — todo corría sobre la GPU integrada AMD. `slam_toolbox` sí aparecía vivo (paso 1) y sí recibía *algo* de LiDAR, pero el paso 3 mostraba drops constantes. Se asumió que esa era toda la causa.
-
-Continuación (19/08): se arregló el driver NVIDIA de raíz (`CLAUDE.md` gotcha #8 — no era "falta instalar", era un conflicto de paquetes `nvidia-driver-570`/`580` instalados a la vez). El LiDAR mejoró a ~1-3.5 Hz. **El paso 3 seguía mostrando los mismos drops, sin excepción.** Eso fue la señal de que la GPU nunca fue la causa completa. La causa real: `use_sim_time:=false` en el comando de `slam_toolbox` (punto 2 de las diferencias, arriba) — cambiar solo ese flag a `true` resolvió el paso 4 (`tf2_echo`) de inmediato, sin tocar nada más.
-
-Lección para el checklist de arriba: si el paso 3 muestra el error de "timestamp earlier than transform cache" de forma **persistente y sin excepción** (no ocasional), sospecha primero de `use_sim_time` antes que de la velocidad del simulador — un simulador lento genera drops *intermitentes*, no un descarte total y permanente. Detalle completo en `CLAUDE.md` (gotchas #6, #8, #9, #11).
+**Tip:** si el paso 3 muestra el error de "timestamp earlier than transform cache" de forma **persistente y sin excepción** (no ocasional), sospechá primero de `use_sim_time:=false` antes que de la velocidad del simulador — un simulador lento genera drops *intermitentes*, no un descarte total y permanente.
 
 ## Referencias
 
