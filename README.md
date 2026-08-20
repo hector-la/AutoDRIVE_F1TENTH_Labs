@@ -58,9 +58,27 @@ Laboratories/
 
 ## Agregar tu propio nodo
 
-El patrón: creás el archivo en `src/controllers/controllers/`, lo registrás como entrypoint en `src/controllers/setup.py`, `colcon build --symlink-install`, y `ros2 run controllers <nombre>`.
+Todos los nodos de control (como `gap_node`) viven en el mismo paquete ROS 2, `controllers`. Para agregar uno propio:
+
+### 1. Crear el archivo del nodo
+
+En `src/controllers/controllers/`, creá un `.py` nuevo — por ejemplo `mi_nodo.py`:
+
+```bash
+cd ~/autodrive/f1tenth_ws
+nano src/controllers/controllers/mi_nodo.py
+```
+
+Con el boilerplate mínimo (mismo patrón que usa `gap_node.py`: se suscribe al LiDAR, publica throttle/steering):
 
 ```python
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32
+
+
 class MiNodo(Node):
     def __init__(self):
         super().__init__('nombre_del_nodo')
@@ -69,10 +87,56 @@ class MiNodo(Node):
         self.steering_pub = self.create_publisher(Float32, '/autodrive/f1tenth_1/steering_command', 1)
 
     def lidar_cb(self, msg):
-        # msg.ranges, msg.angle_min/max/increment
-        self.throttle_pub.publish(Float32(data=...))   # [-1, 1]
-        self.steering_pub.publish(Float32(data=...))    # [-1, 1]
+        # msg.ranges, msg.angle_min/max/increment — tu lógica acá
+        self.throttle_pub.publish(Float32(data=0.0))    # [-1, 1]
+        self.steering_pub.publish(Float32(data=0.0))    # [-1, 1]
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = MiNodo()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
 ```
+
+### 2. Registrar el entrypoint
+
+Abrí `src/controllers/setup.py` y agregá una línea en `entry_points` → `console_scripts` (el formato es `'<comando_que_vas_a_escribir> = controllers.<nombre_del_archivo_sin_.py>:main'`):
+
+```python
+    entry_points={
+        'console_scripts': [
+            'gap_node = controllers.gap_node:main',
+            'mi_nodo = controllers.mi_nodo:main',   # ← la línea nueva
+        ],
+    },
+```
+
+Este paso es el que le dice a ROS 2 qué comando (`ros2 run controllers mi_nodo`) corresponde a qué archivo — sin esto, el archivo existe pero no es ejecutable como nodo.
+
+### 3. Compilar
+
+```bash
+cd ~/autodrive/f1tenth_ws
+source venv/bin/activate && source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+`--symlink-install` es clave: crea un enlace simbólico al `.py` en vez de copiarlo. Gracias a eso, **si después solo editás el contenido del archivo** (sin agregar/quitar nodos ni tocar `setup.py`), los cambios quedan disponibles al instante — no hace falta repetir `colcon build`. Sí hace falta recompilar cuando agregás un archivo nuevo (como ahora) o cambiás algo en `setup.py`.
+
+### 4. Correrlo
+
+```bash
+ros2 run controllers mi_nodo
+```
+
+Si da `No executable found`, casi siempre es que faltó el paso 3 (recompilar) después de registrar el entrypoint.
 
 ## Tópicos clave (F1TENTH)
 
