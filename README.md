@@ -51,16 +51,20 @@ Laboratories/
 └── SLAM_Comandos_Rapidos.md      # la misma guía, solo comandos, para consulta rápida
 ```
 
-## Lab 3 — SLAM (mapeo 2D)
+## Labs
 
-1. Seguí `Laboratories/Tutorial_3_SLAM.md` de punta a punta (explica cada paso) — o `Laboratories/SLAM_Comandos_Rapidos.md` si ya lo hiciste una vez y solo necesitás los comandos.
-2. Vas a: instalar `slam_toolbox`, levantar simulador + bridge + `slam_toolbox` + `gap_node` (maneja solo, no hace falta teleop), mapear el circuito, y guardar el mapa (como imagen `.pgm`/`.yaml` y como pose-graph nativo de `slam_toolbox`).
+- **Lab 3 — SLAM (mapeo 2D):** [`Laboratories/Tutorial_3_SLAM.md`](Laboratories/Tutorial_3_SLAM.md) — instalás `slam_toolbox`, levantás simulador + bridge + `slam_toolbox` + `gap_node` (maneja solo, no hace falta teleop), mapeás el circuito, y guardás el mapa (imagen `.pgm`/`.yaml` + pose-graph nativo de `slam_toolbox`). Explicado paso a paso, con el porqué de cada comando.
+  - Versión solo-comandos, para cuando ya hiciste el lab una vez y no necesitás la explicación: [`Laboratories/SLAM_Comandos_Rapidos.md`](Laboratories/SLAM_Comandos_Rapidos.md).
 
-## Agregar tu propio nodo
+Más labs se van a ir agregando acá a medida que se armen.
 
-Todos los nodos de control (como `gap_node`) viven en el mismo paquete ROS 2, `controllers`. Para agregar uno propio:
+## Notas y consideraciones
 
-### 1. Crear el archivo del nodo
+### Si querés crear tu propio nodo
+
+Esto no es parte del Lab 3 — sirve para cuando quieras programar tu propio controlador (otro algoritmo de Follow The Gap, un wall-follower, PID, pure pursuit, lo que sea) en vez de usar el `gap_node` que ya viene armado. Todos los nodos de control viven en el mismo paquete ROS 2, `controllers`. Para agregar uno propio:
+
+#### 1. Crear el archivo del nodo
 
 En `src/controllers/controllers/`, creá un `.py` nuevo — por ejemplo `mi_nodo.py`:
 
@@ -104,7 +108,7 @@ if __name__ == '__main__':
     main()
 ```
 
-### 2. Registrar el entrypoint
+#### 2. Registrar el entrypoint
 
 Abrí `src/controllers/setup.py` y agregá una línea en `entry_points` → `console_scripts` (el formato es `'<comando_que_vas_a_escribir> = controllers.<nombre_del_archivo_sin_.py>:main'`):
 
@@ -119,7 +123,7 @@ Abrí `src/controllers/setup.py` y agregá una línea en `entry_points` → `con
 
 Este paso es el que le dice a ROS 2 qué comando (`ros2 run controllers mi_nodo`) corresponde a qué archivo — sin esto, el archivo existe pero no es ejecutable como nodo.
 
-### 3. Compilar
+#### 3. Compilar
 
 ```bash
 cd ~/autodrive/f1tenth_ws
@@ -130,7 +134,7 @@ source install/setup.bash
 
 `--symlink-install` es clave: crea un enlace simbólico al `.py` en vez de copiarlo. Gracias a eso, **si después solo editás el contenido del archivo** (sin agregar/quitar nodos ni tocar `setup.py`), los cambios quedan disponibles al instante — no hace falta repetir `colcon build`. Sí hace falta recompilar cuando agregás un archivo nuevo (como ahora) o cambiás algo en `setup.py`.
 
-### 4. Correrlo
+#### 4. Correrlo
 
 ```bash
 ros2 run controllers mi_nodo
