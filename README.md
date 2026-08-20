@@ -1,6 +1,6 @@
 # AutoDRIVE F1TENTH Labs
 
-Lab de SLAM (mapeo 2D) para el F1TENTH en el simulador [AutoDRIVE](https://github.com/Tinker-Twins/AutoDRIVE), pensado para el club AIRos.
+Labs de SLAM (mapeo 2D) y planificación global (raceline) para el F1TENTH en el simulador [AutoDRIVE](https://github.com/Tinker-Twins/AutoDRIVE), pensado para el club AIRos.
 
 ## Requisito previo
 
@@ -12,16 +12,19 @@ Si ya tenés `~/autodrive/f1tenth_ws` compilado y ese teleop funcionando, andá 
 
 ## Cómo usar este repo
 
-Son 4 comandos, uno atrás del otro, sin cambiar de carpeta entre medio (los `cp -r` usan rutas relativas a donde clonaste). Parate en cualquier carpeta que **no** sea `~/autodrive/f1tenth_ws` (por ejemplo tu home, `cd ~`) y corré:
+Son 5 comandos, uno atrás del otro, sin cambiar de carpeta entre medio (los `cp -r` usan rutas relativas a donde clonaste). Parate en cualquier carpeta que **no** sea `~/autodrive/f1tenth_ws` (por ejemplo tu home, `cd ~`) y corré:
 
 ```bash
 git clone https://github.com/hector-la/AutoDRIVE_F1TENTH_Labs.git
 cp -r AutoDRIVE_F1TENTH_Labs/src/controllers ~/autodrive/f1tenth_ws/src/
 cp -r AutoDRIVE_F1TENTH_Labs/src/config ~/autodrive/f1tenth_ws/src/
+cp -r AutoDRIVE_F1TENTH_Labs/src/global_planner ~/autodrive/f1tenth_ws/src/
 cp -r AutoDRIVE_F1TENTH_Labs/Laboratories ~/autodrive/f1tenth_ws/
 ```
 
-El primero (`git clone`) descarga el repo entero a una carpeta nueva `AutoDRIVE_F1TENTH_Labs/`. Los otros tres copian, cada uno, solo la carpeta puntual que necesitás dentro de tu workspace real. Una vez copiado, la carpeta clonada ya no hace falta — podés borrarla si querés (`rm -rf AutoDRIVE_F1TENTH_Labs`), tu workspace ya tiene su propia copia independiente.
+El primero (`git clone`) descarga el repo entero a una carpeta nueva `AutoDRIVE_F1TENTH_Labs/`. Los otros cuatro copian, cada uno, solo la carpeta puntual que necesitás dentro de tu workspace real. Una vez copiado, la carpeta clonada ya no hace falta — podés borrarla si querés (`rm -rf AutoDRIVE_F1TENTH_Labs`), tu workspace ya tiene su propia copia independiente.
+
+(Si solo te interesa el Lab 3 — SLAM — por ahora, podés saltear la línea de `global_planner`; es el paquete del Lab 4.)
 
 Después:
 
@@ -47,18 +50,29 @@ src/
 │   │   └── gap_node.py      # Follow The Gap — navegación reactiva autónoma, para mapear sin manos
 │   └── launch/
 │       └── bridge_with_map.launch.py   # bridge + RViz + mapa guardado, en un solo comando (Lab 3)
-└── config/
-    └── mapper_params_online_async.yaml   # config de slam_toolbox para este setup
+├── config/
+│   └── mapper_params_online_async.yaml   # config de slam_toolbox para este setup
+└── global_planner/       # paquete ROS 2 que publica una raceline ya calculada (Lab 4)
+    ├── global_planner/
+    │   └── raceline_publisher.py   # lee un CSV y lo publica en /raceline + /raceline_markers
+    ├── launch/
+    │   └── raceline_view.launch.py # bridge + RViz + mapa + raceline, en un solo comando
+    └── racelines/                  # vacía a propósito — acá va TU CSV (ver Lab 4)
 
 Laboratories/
-├── Tutorial_3_SLAM.md            # Lab 3: SLAM explicado paso a paso, con el porqué de cada comando
-└── SLAM_Comandos_Rapidos.md      # la misma guía, solo comandos, para consulta rápida
+├── Tutorial_3_SLAM.md                        # Lab 3: SLAM explicado paso a paso, con el porqué de cada comando
+├── SLAM_Comandos_Rapidos.md                  # la misma guía, solo comandos, para consulta rápida
+├── Tutorial_4_Planificacion_Global.md        # Lab 4: traer una raceline ya calculada a AutoDRIVE
+└── Planificacion_Global_Comandos_Rapidos.md  # la misma guía, solo comandos, para consulta rápida
 ```
 
 ## Laboratorios
 
 - **Lab 3 — SLAM (mapeo 2D):** [`Laboratories/Tutorial_3_SLAM.md`](Laboratories/Tutorial_3_SLAM.md) — instalás `slam_toolbox`, levantás simulador + bridge + `slam_toolbox` + `gap_node` (maneja solo, no hace falta teleop), mapeás el circuito, y guardás el mapa (imagen `.pgm`/`.yaml` + pose-graph nativo de `slam_toolbox`). Explicado paso a paso, con el porqué de cada comando.
   - Versión solo-comandos, para cuando ya hiciste el lab una vez y no necesitás la explicación: [`Laboratories/SLAM_Comandos_Rapidos.md`](Laboratories/SLAM_Comandos_Rapidos.md).
+
+- **Lab 4 — Planificación Global (raceline):** [`Laboratories/Tutorial_4_Planificacion_Global.md`](Laboratories/Tutorial_4_Planificacion_Global.md) — continúa directo después del Lab 3, usando el mapa que acabás de guardar ahí. **No enseña ningún algoritmo de planificación** (Dijkstra, A*, RRT, Cubic-Spline, Fem-pos...) — eso es tu propio trabajo, en un proyecto aparte, con lo que te hayan asignado. Lo que sí explica: cómo llevar tu mapa a ese proyecto, y cómo traer de vuelta el resultado (una raceline en CSV) para verla en RViz, alineada con el mapa y el auto, publicada como tópico ROS 2 (`/raceline`) para que un controlador la siga más adelante.
+  - Versión solo-comandos: [`Laboratories/Planificacion_Global_Comandos_Rapidos.md`](Laboratories/Planificacion_Global_Comandos_Rapidos.md).
 
 Más labs se van a ir agregando acá a medida que se armen.
 
